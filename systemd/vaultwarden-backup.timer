@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Vaultwarden backup daily
+Description=Daily Vaultwarden backup pull
 
 [Timer]
-OnCalendar=*-*-* 18:00:00
-OnBootSec=5min
+OnCalendar=*-*-* 03:30:00
+# The Pi is always on, but if it was down at 03:30, run right after boot
 Persistent=true
 
 [Install]

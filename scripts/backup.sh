@@ -1,50 +1,53 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# backup.sh - runs on the Pi as the unprivileged "vwbackup" user
+# (see systemd/vaultwarden-backup.service).
+#
+# Pulls a backup archive from the VPS over SSH, verifies it and only then
+# stores it as snapshots/<UTC time>.tar.gz. A failed run leaves nothing
+# behind, so every file in snapshots/ is a verified backup.
+set -euo pipefail
 
-set -e
+: "${VPS_HOST:?set it in /etc/vaultwarden-backup/backup.env}"
+: "${VPS_USER:?set it in /etc/vaultwarden-backup/backup.env}"
+: "${KEEP_DAYS:=30}"
 
-SERVER="vpsru"
-REMOTE_DIR="/home/deploy/vaultwarden/vw-data"
-BACKUP_ROOT="$HOME/backups/vaultwarden"
-SSH_KEY="$HOME/.ssh/id_ed25519"
+STATE_DIR="${STATE_DIRECTORY:-/var/lib/vaultwarden-backup}"   # set by systemd
+SNAP_DIR="$STATE_DIR/snapshots"
 
-DATE=$(date +"%Y-%m-%d_%H-%M")
-NEW_BACKUP="$BACKUP_ROOT/$DATE"
-LATEST="$BACKUP_ROOT/latest"
+fail() { echo "ERROR: $*" >&2; exit 1; }
 
-mkdir -p "$BACKUP_ROOT"
-mkdir -p "$NEW_BACKUP"
+mkdir -p "$SNAP_DIR"
+ts=$(date -u +%Y-%m-%dT%H%M%SZ)
+partial="$SNAP_DIR/.partial-$ts.tar.gz"
+work=$(mktemp -d)
+trap 'rm -rf -- "$work" "$partial"' EXIT
 
-if [ -d "$LATEST" ]; then
-    LAST_BACKUP=$(stat -c %Y "$LATEST")
-    NOW=$(date +%s)
-    DIFF=$(( (NOW - LAST_BACKUP) / 3600 ))
-    if [ "$DIFF" -lt 20 ]; then
-        echo "Last backup was ${DIFF}h ago, skipping"
-        exit 0
-    fi
-fi
+# 1. Pull. The key's forced command on the VPS (vps/vw-backup-export)
+#    ignores what we ask for and streams a tar.gz to stdout. -T: no terminal.
+ssh -T -i "$STATE_DIR/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes \
+    -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$STATE_DIR/.ssh/known_hosts" \
+    -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+    "$VPS_USER@$VPS_HOST" > "$partial"
 
-echo "Starting Vaultwarden backup: $DATE"
+# 2. Verify before accepting.
+gzip -t "$partial"             || fail "archive is not valid gzip"
+tar -xzf "$partial" -C "$work" || fail "cannot unpack archive"
+for f in db.sqlite3 manifest.env rsa_key.pem; do
+    [[ -s "$work/$f" ]] || fail "archive has no $f"
+done
+check=$(sqlite3 "$work/db.sqlite3" 'PRAGMA integrity_check;' 2>&1) || fail "sqlite3: $check"
+[[ "$check" == "ok" ]] || fail "integrity_check: $check"
 
-# если есть previous backup — используем hardlinks
-if [ -d "$LATEST" ]; then
-    rsync -a --delete \
-        --link-dest="$LATEST" \
-        -e "ssh -i $SSH_KEY" \
-        $SERVER:$REMOTE_DIR \
-        "$NEW_BACKUP"
-else
-    rsync -a \
-        -e "ssh -i $SSH_KEY" \
-        $SERVER:$REMOTE_DIR \
-        "$NEW_BACKUP"
-fi
+# 3. Accept. rename(2) is atomic: snapshots/ never holds a half-written file.
+#    latest.tar.gz is swapped the same way (ln -sf alone would unlink first).
+mv "$partial" "$SNAP_DIR/$ts.tar.gz"
+ln -sfn "$ts.tar.gz" "$SNAP_DIR/.latest.tmp"
+mv -T "$SNAP_DIR/.latest.tmp" "$SNAP_DIR/latest.tar.gz"
 
-# обновляем latest symlink
-rm -f "$LATEST"
-ln -s "$NEW_BACKUP" "$LATEST"
+# 4. Retention. It runs only after a verified backup, so it can never
+#    delete the last good one.
+find "$SNAP_DIR" -maxdepth 1 -type f -name '20*.tar.gz' -mtime +"$KEEP_DAYS" -print -delete
+find "$SNAP_DIR" -maxdepth 1 -type f -name '.partial-*' -mmin +60 -print -delete
 
-# удалить backup старше 30 дней
-find "$BACKUP_ROOT" -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
-
-echo "Backup completed"
+echo "backup ok: $ts.tar.gz, $(du -h "$SNAP_DIR/$ts.tar.gz" | cut -f1)," \
+     "Vaultwarden $(sed -n 's/^VW_VERSION=//p' "$work/manifest.env")"
