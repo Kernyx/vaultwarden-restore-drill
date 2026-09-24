@@ -1,0 +1,6 @@
+[Unit]
+Description=Vaultwarden Backup via rsync
+
+[Service]
+Type=oneshot
+ExecStart=%h/backups/scripts/backup_vaultwarden.sh

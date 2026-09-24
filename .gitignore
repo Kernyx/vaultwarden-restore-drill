@@ -1,0 +1,2 @@
+# Local secrets (Telegram bot token, etc.) - never commit
+.env
