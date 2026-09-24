@@ -53,3 +53,23 @@ sudo systemctl start vaultwarden-backup.service
 journalctl -u vaultwarden-backup.service -n 5     # ждём "backup ok: ..."
 sudo systemctl enable --now vaultwarden-backup.timer
 ```
+
+## 5. Pi: алерты в Telegram
+
+API Telegram из сети Pi заблокирован, поэтому запросы идут через локальный SOCKS-прокси (адрес — в `TELEGRAM_PROXY`).
+
+```bash
+sudo install -m 0755 scripts/notify-telegram.sh /usr/local/lib/vaultwarden-backup/
+sudo install -m 0644 systemd/notify-telegram@.service /etc/systemd/system/
+# токен читает только root; сервис алерта получает копию через LoadCredential=
+sudo install -o root -g root -m 0600 config/telegram.env.example /etc/vaultwarden-backup/telegram.env
+sudoedit /etc/vaultwarden-backup/telegram.env      # токен от @BotFather
+
+# chat id: написать боту любое сообщение, затем
+read -rs TOKEN                                      # токен не отобразится и не попадёт в историю
+curl -s --proxy socks5h://127.0.0.1:10808 "https://api.telegram.org/bot$TOKEN/getUpdates" \
+  | python3 -m json.tool | grep -A1 '"chat"'       # id -> TELEGRAM_CHAT_ID
+sudo systemctl daemon-reload
+```
+
+Проверка: временно сломать бэкап (например, неверный `VPS_USER` через drop-in в `/run/systemd/system/vaultwarden-backup.service.d/`), запустить `vaultwarden-backup.service` и дождаться сообщения.
