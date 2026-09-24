@@ -1,0 +1,26 @@
+# Template. render-alertmanager-config.sh fills in @...@ from
+# /etc/vaultwarden-backup/telegram.env and writes the real config to
+# /etc/vaultwarden-backup/alertmanager/ - the chat id stays out of git.
+route:
+  receiver: telegram
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 6h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/telegram_bot_token
+        chat_id: @TELEGRAM_CHAT_ID@
+        send_resolved: true
+        parse_mode: ""
+        message: |-
+          {{ if eq .Status "firing" }}🔥{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}: {{ .Status }}
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+        http_config:
+          # Telegram API is blocked from the Pi's network
+          proxy_url: @TELEGRAM_PROXY_URL@

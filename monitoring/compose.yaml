@@ -1,0 +1,77 @@
+# Monitoring for the backups: metrics, alerts, dashboard. Runs on the Pi.
+#
+# Every service uses the host network and listens on 127.0.0.1 only:
+# nothing is reachable from the LAN, Grafana is opened through an SSH
+# tunnel, and Alertmanager reaches the local SOCKS proxy at 127.0.0.1.
+name: vw-monitoring
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+      # *.prom files written by backup.sh and restore-drill.sh
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - /:/host:ro,rslave
+      - /var/lib/node_exporter/textfile:/textfile:ro
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=127.0.0.1:9093
+      # a single instance: no HA gossip port (9094 on all interfaces by default)
+      - --cluster.listen-address=
+    volumes:
+      # rendered by render-alertmanager-config.sh: holds the chat id and the
+      # bot token, so it lives outside the repo
+      - /etc/vaultwarden-backup/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env   # GF_SECURITY_ADMIN_PASSWORD, not in git
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: "3000"
+      # read-only view without login: it is only reachable via SSH tunnel anyway
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Bundled datasources we never use; each runs its own backend process
+      # (IDs taken from their plugin.json). Saves RAM on the Pi.
+      GF_PLUGINS_DISABLE_PLUGINS: >-
+        cloudwatch,grafana-azure-monitor-datasource,grafana-postgresql-datasource,grafana-testdata-datasource,graphite,jaeger,loki,mssql,mysql
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

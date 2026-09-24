@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  # Dashboards come from JSON files in the repo, not from clicks in the UI
+  - name: vaultwarden-restore-drill
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

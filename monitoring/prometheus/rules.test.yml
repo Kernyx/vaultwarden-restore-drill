@@ -1,0 +1,52 @@
+rule_files:
+  - rules/vaultwarden.yml
+evaluation_interval: 1m
+tests:
+  - name: fresh
+    interval: 1m
+    input_series:
+      - series: vaultwarden_backup_last_success_timestamp_seconds
+        values: '100000+0x1670'
+      - series: vaultwarden_drill_last_success_timestamp_seconds
+        values: '100000+0x1670'
+    alert_rule_test:
+      - eval_time: 1670m
+        alertname: VaultwardenBackupStale
+        exp_alerts: []
+      - eval_time: 1670m
+        alertname: VaultwardenDrillStale
+        exp_alerts: []
+  - name: stale
+    interval: 1m
+    input_series:
+      - series: vaultwarden_backup_last_success_timestamp_seconds
+        values: '0+0x1670'
+      - series: vaultwarden_drill_last_success_timestamp_seconds
+        values: '0+0x1670'
+    alert_rule_test:
+      - eval_time: 1670m
+        alertname: VaultwardenBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No verified Vaultwarden backup for 1d 3h 50m 0s"
+              description: "Backups run daily at 03:30. Check: journalctl -u vaultwarden-backup.service"
+      - eval_time: 1670m
+        alertname: VaultwardenDrillStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No successful restore drill for 1d 3h 50m 0s"
+              description: "Drills run daily at 04:00. Check: journalctl -u vaultwarden-drill.service"
+  - name: missing
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: VaultwardenBackupMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Backup or drill metrics are missing"
+              description: "Check /var/lib/node_exporter/textfile and the node-exporter container"
