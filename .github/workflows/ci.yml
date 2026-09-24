@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install linters
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh vps/vw-backup-export monitoring/render-alertmanager-config.sh
+      - name: Validate JSON and Compose
+        run: |
+          python3 -m json.tool monitoring/grafana/dashboards/vaultwarden.json >/dev/null
+          cp monitoring/.env.example monitoring/.env
+          docker compose -f monitoring/compose.yaml config --quiet
+      - name: Validate Prometheus and alert rules
+        run: |
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool prom/prometheus:v3.14.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
+            -w /etc/prometheus --entrypoint promtool prom/prometheus:v3.14.0 \
+            test rules rules.test.yml
+      - name: Validate Alertmanager template
+        run: |
+          sed -e 's/@TELEGRAM_CHAT_ID@/123456789/' \
+              -e 's|@TELEGRAM_PROXY_URL@|socks5://127.0.0.1:10808|' \
+              monitoring/alertmanager/alertmanager.yml.tmpl > /tmp/alertmanager.yml
+          printf test-token > /tmp/telegram_bot_token
+          docker run --rm -v /tmp:/etc/alertmanager:ro \
+            --entrypoint amtool prom/alertmanager:v0.34.1 \
+            check-config /etc/alertmanager/alertmanager.yml
