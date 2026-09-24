@@ -1,0 +1,19 @@
+[Unit]
+Description=Restore drill: start Vaultwarden from the latest backup and check it
+Documentation=https://github.com/Kernyx/vaultwarden-restore-drill
+After=vaultwarden-backup.service
+# Any failed check -> Telegram alert (same notifier as the backup)
+OnFailure=notify-telegram@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/vaultwarden-backup/restore-drill.sh
+# Rootful Podman needs root; the container itself is locked down by the script.
+# /var/lib/vaultwarden-drill: restored data during the run, last counts after.
+StateDirectory=vaultwarden-drill
+StateDirectoryMode=0700
+UMask=0077
+ProtectHome=yes
+PrivateTmp=yes
+# Includes pulling a new image when Vaultwarden on the VPS was updated
+TimeoutStartSec=15min
