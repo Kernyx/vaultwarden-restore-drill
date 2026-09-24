@@ -10,12 +10,15 @@ set -euo pipefail
 CONTAINER="vaultwarden"
 DATA_DIR="$HOME/vaultwarden/vw-data"   # mounted as /data in the container
 
-# Leftovers of runs killed mid-stream (the EXIT trap does not run on SIGKILL).
+# Leftovers of runs killed by SIGKILL (no trap can catch that one).
 find "$HOME" -maxdepth 1 -name '.vw-backup-export.*' -mmin +60 -exec rm -rf {} +
 
 # Temp dir on the same filesystem as DATA_DIR, so the mv below is a rename.
 work=$(mktemp -d "$HOME/.vw-backup-export.XXXXXX")
 trap 'rm -rf -- "$work"' EXIT
+# If the client drops the connection, we get SIGHUP/SIGPIPE. By default bash
+# just dies and skips the EXIT trap, so turn these signals into a normal exit.
+trap 'exit 1' HUP INT TERM PIPE
 
 # 1. Consistent snapshot of the live SQLite database. Vaultwarden's own
 #    `backup` command makes it while the service keeps running and prints:
