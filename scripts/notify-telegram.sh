@@ -33,8 +33,15 @@ if [[ -z "$logs" ]]; then
     logs=$(journalctl --no-pager -o cat -u "$unit" -n 10)
 fi
 
-text="❌ $unit failed ($result) on $(hostname), $(date '+%Y-%m-%d %H:%M %Z')
+# The first ERROR/FAILED line goes on top: other output (e.g. container
+# events) can push it out of the last 10 lines.
+reason=$(journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID="${MONITOR_INVOCATION_ID:-none}" \
+         | grep -m1 -E 'ERROR|FAILED' || true)
 
+text="❌ $unit failed ($result) on $(hostname), $(date '+%Y-%m-%d %H:%M %Z')
+${reason:+
+Reason: $reason
+}
 ${logs:0:3000}"
 
 # The token is part of the URL. URL and proxy go through a curl config file

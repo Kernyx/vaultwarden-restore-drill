@@ -19,6 +19,8 @@ StateDirectoryMode=0700
 UMask=0077
 # Sandbox: read-only system, no /home, private /tmp, no privilege escalation
 ProtectSystem=strict
+# ...except the metrics directory read by node_exporter
+ReadWritePaths=/var/lib/node_exporter/textfile
 ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
