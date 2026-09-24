@@ -73,3 +73,18 @@ sudo systemctl daemon-reload
 ```
 
 Проверка: временно сломать бэкап (например, неверный `VPS_USER` через drop-in в `/run/systemd/system/vaultwarden-backup.service.d/`), запустить `vaultwarden-backup.service` и дождаться сообщения.
+
+## 6. Pi: ежедневная проверка восстановления
+
+```bash
+sudo install -m 0755 scripts/restore-drill.sh /usr/local/lib/vaultwarden-backup/
+sudo install -m 0644 systemd/vaultwarden-drill.service systemd/vaultwarden-drill.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start vaultwarden-drill.service   # первый запуск скачает образ Vaultwarden
+journalctl -u vaultwarden-drill.service -n 5     # ждём "drill ok: ..."
+sudo systemctl enable --now vaultwarden-drill.timer
+
+# проверить на любом архиве, например специально испорченном
+# (не из /root и не из /home: при запуске через systemd их скрывает ProtectHome=yes)
+sudo /usr/local/lib/vaultwarden-backup/restore-drill.sh /path/to/archive.tar.gz
+```
