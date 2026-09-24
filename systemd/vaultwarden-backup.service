@@ -3,6 +3,8 @@ Description=Pull and verify a Vaultwarden backup from the VPS
 Documentation=https://github.com/Kernyx/vaultwarden-restore-drill
 Wants=network-online.target
 After=network-online.target tailscaled.service
+# Any failure (non-zero exit, timeout, crash) -> Telegram alert
+OnFailure=notify-telegram@%n.service
 
 [Service]
 Type=oneshot

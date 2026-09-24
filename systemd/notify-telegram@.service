@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram alert: %i failed
+Documentation=https://github.com/Kernyx/vaultwarden-restore-drill
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/vaultwarden-backup/notify-telegram.sh %i
+# A throwaway user allocated for each run; also implies ProtectSystem=strict,
+# PrivateTmp and NoNewPrivileges ...
+DynamicUser=yes
+# ... that may read the journal of the failed unit
+SupplementaryGroups=systemd-journal
+# Bot token: systemd passes a private read-only copy, not an env variable
+LoadCredential=telegram.env:/etc/vaultwarden-backup/telegram.env
