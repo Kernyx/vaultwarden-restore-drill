@@ -1,0 +1,5 @@
+# Line for ~deploy/.ssh/authorized_keys on the VPS (one line, no line breaks).
+#   from=     the key works only from the Pi's tailnet address
+#   restrict  no terminal, no port / agent / X11 forwarding
+#   command=  whatever the client asks for, only the export script runs
+from="<pi-tailnet-ip>",restrict,command="/home/deploy/bin/vw-backup-export" ssh-ed25519 AAAA...key... vwbackup@raspberrypi

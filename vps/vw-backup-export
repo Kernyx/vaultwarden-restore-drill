@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# vw-backup-export - runs on the VPS as the SSH forced command of the backup
+# key (see vps/authorized_keys.example). Whatever command the client asks
+# for, it only gets this: a gzipped tar with everything needed to restore
+# Vaultwarden, written to stdout.
+#
+# stdout carries the archive only; every message goes to stderr.
+set -euo pipefail
+
+CONTAINER="vaultwarden"
+DATA_DIR="$HOME/vaultwarden/vw-data"   # mounted as /data in the container
+
+# Leftovers of runs killed mid-stream (the EXIT trap does not run on SIGKILL).
+find "$HOME" -maxdepth 1 -name '.vw-backup-export.*' -mmin +60 -exec rm -rf {} +
+
+# Temp dir on the same filesystem as DATA_DIR, so the mv below is a rename.
+work=$(mktemp -d "$HOME/.vw-backup-export.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+
+# 1. Consistent snapshot of the live SQLite database. Vaultwarden's own
+#    `backup` command makes it while the service keeps running and prints:
+#    Backup to 'data/db_YYYYMMDD_HHMMSS.sqlite3' was successful
+if ! out=$(podman exec "$CONTAINER" /vaultwarden backup 2>&1); then
+    echo "vw-backup-export: 'vaultwarden backup' failed: $out" >&2
+    exit 1
+fi
+snap=$(sed -n "s/^Backup to '\(.*\)' was successful$/\1/p" <<<"$out")
+snap_file="$DATA_DIR/$(basename "${snap:-none}")"
+if [[ -z "$snap" || ! -f "$snap_file" ]]; then
+    echo "vw-backup-export: unexpected output of 'vaultwarden backup': $out" >&2
+    exit 1
+fi
+mv "$snap_file" "$work/db.sqlite3"
+
+# 2. Manifest: when the backup was made and by which Vaultwarden version.
+#    The restore drill starts exactly this version.
+{
+    echo "CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "VW_VERSION=$(podman exec "$CONTAINER" /vaultwarden --version | sed -n 's/^Vaultwarden //p')"
+} > "$work/manifest.env"
+
+# 3. Other files needed for restore. Left out on purpose: the live
+#    db.sqlite3* files, icon_cache/ (re-downloadable) and tmp/.
+extra=()
+for item in rsa_key.pem rsa_key.der rsa_key.pub.der attachments sends config.json; do
+    if [[ -e "$DATA_DIR/$item" ]]; then
+        extra+=("$item")
+    fi
+done
+
+# 4. Stream the archive.
+tar -czf - -C "$work" db.sqlite3 manifest.env -C "$DATA_DIR" "${extra[@]}"
