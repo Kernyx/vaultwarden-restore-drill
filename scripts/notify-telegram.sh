@@ -4,7 +4,11 @@
 # units reference via OnFailure=notify-telegram@%n.service.
 set -euo pipefail
 
-unit="${1:?usage: notify-telegram.sh <unit>}"
+# For units started via OnFailure=, systemd itself says which unit failed,
+# how, and the invocation ID of exactly that run (see systemd.exec(5)).
+# The argument is only a fallback for manual runs.
+unit="${MONITOR_UNIT:-${1:?usage: notify-telegram.sh <unit>}}"
+result="${MONITOR_SERVICE_RESULT:-unknown}, exit status ${MONITOR_EXIT_STATUS:-?}"
 
 # Settings come as a systemd credential (LoadCredential=): a private copy of
 # /etc/vaultwarden-backup/telegram.env, readable only by this service run.
@@ -20,13 +24,16 @@ fi
 
 # Log lines of exactly the failed run: each run of a unit gets its own
 # invocation ID, so lines of older runs do not end up in the message.
-inv=$(systemctl show -p InvocationID --value "$unit")
-logs=$(journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID="$inv" 2>/dev/null | tail -n 10)
+# (Not `systemctl show`: from a DynamicUser sandbox it cannot reach D-Bus.)
+logs=""
+if [[ -n "${MONITOR_INVOCATION_ID:-}" ]]; then
+    logs=$(journalctl --no-pager -o cat _SYSTEMD_INVOCATION_ID="$MONITOR_INVOCATION_ID" | tail -n 10)
+fi
 if [[ -z "$logs" ]]; then
     logs=$(journalctl --no-pager -o cat -u "$unit" -n 10)
 fi
 
-text="❌ $unit failed on $(hostname), $(date '+%Y-%m-%d %H:%M %Z')
+text="❌ $unit failed ($result) on $(hostname), $(date '+%Y-%m-%d %H:%M %Z')
 
 ${logs:0:3000}"
 
